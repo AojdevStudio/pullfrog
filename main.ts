@@ -219,7 +219,11 @@ export async function main(): Promise<MainResult> {
   // installers key their fs cache off that variable *at call time* — so a
   // second call silently invalidated the cache and re-downloaded plus
   // re-extracted the whole opencode tarball on every run.
-  const tmpdir = createTempDirectory();
+  //
+  // `using` removes it only when main() returns, after both run-end paths
+  // below have persisted the PR summary and learnings they read from here.
+  using tempDir = createTempDirectory();
+  const tmpdir = tempDir.path;
 
   // install OpenCode + capture the BASELINE model set BEFORE dbSecrets and
   // Codex auth.json are in scope. this is the set of models OpenCode can
