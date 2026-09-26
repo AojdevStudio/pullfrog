@@ -1560,12 +1560,13 @@ type Ladder = Record<RouterTier, string>;
  * (Luna/Terra/Sol/Astra): the console lists the whole ladder as what Auto runs
  * on, so every rung is a model the customer can see. anthropic doubles Opus at
  * `deep` because Fable is access-gated (see its alias) and an automatic rung
- * must run on every accepted credential; a two-model provider doubles up at
- * the cheap end.
+ * must run on every accepted credential, and doubles Sonnet at `minimal`
+ * because Haiku 4.5 ends most reviews without ever submitting one (see
+ * wiki/router.md); a two-model provider doubles up at the cheap end.
  */
 const PROVIDER_LADDERS: Record<string, Ladder> = {
   anthropic: {
-    minimal: "anthropic/claude-haiku",
+    minimal: "anthropic/claude-sonnet",
     light: "anthropic/claude-sonnet",
     standard: "anthropic/claude-opus",
     deep: "anthropic/claude-opus",
