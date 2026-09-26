@@ -59,6 +59,18 @@ import { parseXaiAuthBody, type XaiAuthBody } from "./xaiOAuth.ts";
 
 const CODEX_AUTH_ENV = "CODEX_AUTH_JSON";
 const XAI_AUTH_ENV = "GROK_AUTH_JSON";
+const installedSubscriptionPaths = new Map<string, string>();
+
+export function clearInstalledSubscription(name: "CODEX_AUTH_JSON" | "GROK_AUTH_JSON") {
+  const path = installedSubscriptionPaths.get(name);
+  if (!path || !existsSync(path)) return;
+  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  if (!value || typeof value !== "object") return;
+  if (name === "CODEX_AUTH_JSON" && "openai" in value) delete value.openai;
+  if (name === "GROK_AUTH_JSON" && "xai" in value) delete value.xai;
+  writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+  installedSubscriptionPaths.delete(name);
+}
 
 /** sandbox-hidden home for pullfrog-managed on-disk secrets in CI. bash via
  * MCP shell tmpfs-overlays this path; opencode's internal auth module
@@ -165,6 +177,7 @@ export function installCodexAuth(): InstalledCodexAuth | null {
   process.env.XDG_DATA_HOME = xdgDataHome;
 
   log.info(`» installed Codex auth at ${authPath}`);
+  installedSubscriptionPaths.set(CODEX_AUTH_ENV, authPath);
 
   return {
     authPath,
@@ -254,6 +267,7 @@ export function installXaiAuth(): InstalledXaiAuth | null {
 
   process.env.XDG_DATA_HOME = xdgDataHome;
   log.info(`» installed Grok auth at ${authPath}`);
+  installedSubscriptionPaths.set(XAI_AUTH_ENV, authPath);
 
   return { authPath, xdgDataHome, originalRefresh: body.tokens.refresh_token };
 }

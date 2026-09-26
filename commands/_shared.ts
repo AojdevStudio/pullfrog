@@ -74,7 +74,7 @@ export function bail(msg: string): never {
   process.exit(1);
 }
 
-export function handleCancel<T>(value: T | symbol): asserts value is T {
+export function handleCancel<T>(value: T): asserts value is Exclude<T, symbol> {
   if (p.isCancel(value)) {
     if (activeSpin) {
       activeSpin.stop(pc.red("canceled."));

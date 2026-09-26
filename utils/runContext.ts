@@ -3,6 +3,7 @@ import type { RouterTier } from "../models.ts";
 import { apiFetch } from "./apiFetch.ts";
 import type { CommercialRefusal } from "./billingErrors.ts";
 import type { RepoContext } from "./github.ts";
+import type { CredentialAccess } from "./subscriptionCredentials.ts";
 
 export interface Mode {
   id: string;
@@ -81,6 +82,7 @@ export interface RepoSettings {
 export type AccountPlan = "none" | "payg";
 
 export interface RunContext {
+  credentialAccess?: CredentialAccess | undefined;
   settings: RepoSettings;
   apiToken: string;
   oss: boolean;
@@ -189,6 +191,7 @@ export async function fetchRunContext(params: {
   try {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${params.token}`,
+      "X-Pullfrog-Credential-Pools": "1",
     };
     if (params.oidcToken) {
       headers["X-GitHub-OIDC-Token"] = params.oidcToken;
@@ -232,6 +235,7 @@ export async function fetchRunContext(params: {
       plan?: AccountPlan;
       proxyModel?: string;
       dbSecrets?: Record<string, string>;
+      credentialAccess?: CredentialAccess;
       secretsUnavailable?: boolean;
       routerUnfunded?: boolean;
       trialFallback?: boolean;
@@ -260,6 +264,7 @@ export async function fetchRunContext(params: {
       plan: data.plan ?? "none",
       proxyModel: data.proxyModel,
       dbSecrets: data.dbSecrets,
+      credentialAccess: data.credentialAccess,
       secretsUnavailable: data.secretsUnavailable,
       routerUnfunded: data.routerUnfunded,
       trialFallback: data.trialFallback,

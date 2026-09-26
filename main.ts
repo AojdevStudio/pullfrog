@@ -30,6 +30,11 @@ import { resolveBody } from "./utils/body.ts";
 import { log } from "./utils/cli.ts";
 import { installCodexAuth, installXaiAuth, PULLFROG_DATA_DIR } from "./utils/codexHome.ts";
 import { checkConfiguredCredentials } from "./utils/credentialFallback.ts";
+import {
+  initializeCredentialPool,
+  resolvePoolModel,
+  selectConfiguredCredential,
+} from "./utils/credentialPool.ts";
 import { recordDiffReadFromToolUse } from "./utils/diffCoverage.ts";
 import { onExitSignal } from "./utils/exitHandler.ts";
 import { resolveGit, setGitAuthServer } from "./utils/gitAuth.ts";
@@ -248,6 +253,7 @@ export async function main(): Promise<MainResult> {
   captureBaselineModels(opencodeCliPath);
 
   // inject account-level secrets into process.env (YAML secrets take precedence).
+  await initializeCredentialPool(runContext, resolveModel({ slug: payload.model }));
   // sanitizeSecret trims + masks so accidental trailing whitespace doesn't leak
   // through GitHub Actions' line-based log masking. whitespace-only values
   // return null and skip injection so the user sees a clear missing-key error.
@@ -394,6 +400,19 @@ export async function main(): Promise<MainResult> {
     await using gitAuthServer = await startGitAuthServer(tmpdir);
     setGitAuthServer(gitAuthServer);
 
+    let configuredModel = resolveModel({ slug: payload.model });
+    if (!configuredModel && !payload.proxyModel && runContext.credentialAccess?.candidates.length) {
+      configuredModel = resolvePoolModel({
+        codexAgent: runContext.repoSettings.codexAgent || payload.codexArm === true,
+      });
+    }
+    let poolSelected =
+      !payload.proxyModel &&
+      (await selectConfiguredCredential({
+        ctx: runContext,
+        model: configuredModel,
+      }));
+
     // model-access gate: an explicitly-requested per-run model (`--opus`,
     // `--model=<slug>`) that this run can't serve hard-fails here, before the
     // agent starts. standing defaults keep `modelExplicit = false` and fall
@@ -406,8 +425,11 @@ export async function main(): Promise<MainResult> {
       oss: runContext.oss,
       proxyActive: !!payload.proxyModel,
       subsidyTarget: runContext.proxyModel,
-      resolvedModel: resolveModel({ slug: payload.model }),
-      authorized: getAuthorizedModels(),
+      resolvedModel: configuredModel,
+      authorized: new Set([
+        ...getAuthorizedModels(),
+        ...(poolSelected && configuredModel ? [configuredModel] : []),
+      ]),
     });
     if (access.kind === "error") {
       throw new Error(
@@ -420,7 +442,20 @@ export async function main(): Promise<MainResult> {
       );
     }
     if (access.kind === "proxy") payload.proxyModel = access.target;
-    if (access.kind === "byok") payload.proxyModel = undefined;
+    if (access.kind === "byok") {
+      payload.proxyModel = undefined;
+      if (!poolSelected)
+        poolSelected = await selectConfiguredCredential({
+          ctx: runContext,
+          model: configuredModel,
+        });
+    }
+    if (poolSelected) {
+      const before = repoDir ? await dirtyTrackedPaths({ cwd: repoDir }) : null;
+      captureAuthorizedModels(opencodeCliPath);
+      if (before && repoDir)
+        await restoreDirtiedSince({ before, actor: "model introspection", cwd: repoDir });
+    }
 
     // a subsidised run is Pullfrog's spend, so it is pinned to `high` on
     // whatever ladder the funded model publishes — matching what every OSS run
@@ -430,7 +465,7 @@ export async function main(): Promise<MainResult> {
       payload.effort = ossEffortFloor({ payload });
     }
 
-    const configuredModel = payload.proxyModel ? undefined : resolveModel({ slug: payload.model });
+    if (payload.proxyModel) configuredModel = undefined;
 
     // ask the providers whether the configured model's credentials still work
     // before committing to it. a rejected credential becomes either a run on
@@ -439,12 +474,13 @@ export async function main(): Promise<MainResult> {
     // to a GitHub Actions secrets page they had never put a key in. skipped
     // for proxy runs for the same reason validateAgentApiKey is: the server
     // minted the key and is the authority on it.
-    const credentials = payload.proxyModel
-      ? { kind: "ok" as const }
-      : await checkConfiguredCredentials({
-          model: configuredModel,
-          authorized: getAuthorizedModels(),
-        });
+    const credentials =
+      payload.proxyModel || poolSelected
+        ? { kind: "ok" as const }
+        : await checkConfiguredCredentials({
+            model: configuredModel,
+            authorized: getAuthorizedModels(),
+          });
     if (credentials.kind === "dead") {
       throw new Error(
         buildRejectedCredentialError({

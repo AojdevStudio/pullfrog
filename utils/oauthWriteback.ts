@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import * as core from "@actions/core";
+import { z } from "zod";
 import { apiFetch } from "./apiFetch.ts";
 import { detectCodexRefresh, detectXaiRefresh, type OAuthWriteback } from "./codexRefreshDetect.ts";
 
@@ -93,14 +94,18 @@ async function writeBackEntry(apiToken: string, entry: OAuthWriteback): Promise<
   }
 
   try {
+    const poolState = core.getState("credential_receipts");
+    const receipts = z.record(z.string(), z.string()).parse(JSON.parse(poolState || "{}"));
+    const receipt = receipts[entry.secretName];
+    if (poolState && !receipt) return;
     const response = await apiFetch({
-      path: "/api/runtime/secret",
+      path: receipt ? "/api/runtime/credentials" : "/api/runtime/secret",
       method: "PUT",
       headers: {
         authorization: `Bearer ${apiToken}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ name: entry.secretName, value: refreshed }),
+      body: JSON.stringify({ name: entry.secretName, value: refreshed, receipt }),
       // the workflow is already finished; a hung write-back would hold the
       // runner open for nothing.
       signal: AbortSignal.timeout(30_000),

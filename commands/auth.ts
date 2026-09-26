@@ -48,12 +48,10 @@ import {
   GROK_AUTH_SECRET,
   getGhToken,
   handleCancel,
-  PULLFROG_API_URL,
   promptScope,
   setActiveSpin,
-  setPullfrogSecret,
-  shadowRefusal,
 } from "./_shared.ts";
+import { chooseSubscription, manageSubscriptions, saveSubscription } from "./_subscriptions.ts";
 import { secretNamesSchema } from "./secret.ts";
 
 /** prefix on `claude setup-token` OAuth tokens (`sk-ant-oat01-…`). a
@@ -121,6 +119,9 @@ function printAuthUsage(params: { stream: typeof console.log; prog: string }): v
   params.stream("  codex    mint a Codex (ChatGPT) subscription credential");
   params.stream("  claude   save a Claude Code subscription OAuth token");
   params.stream("  grok     mint a Grok (SuperGrok / X Premium) subscription credential");
+  params.stream("  list     list subscriptions and their IDs");
+  params.stream("  remove   remove a subscription by binding ID");
+  params.stream("  share | unshare   grant or revoke personal subscription access (--from OWNER)");
   params.stream("");
   params.stream("options:");
   params.stream("  --org OWNER | --repo OWNER/REPO   select the credential scope");
@@ -161,6 +162,10 @@ export async function runCli(params: AuthCliParams): Promise<void> {
 
   const subcommand = firstArg;
   const rest = params.args.slice(1);
+  if (["list", "remove", "share", "unshare"].includes(subcommand)) {
+    await manageSubscriptions({ command: subcommand, args: rest });
+    return;
+  }
 
   if (subcommand === "codex") {
     await runCodex({ args: rest, prog: params.prog });
@@ -214,23 +219,6 @@ async function runCodex(params: CodexCliParams): Promise<void> {
 
   if (parsed._.length) throw new Error("unexpected auth argument");
   await runCodexAuth(parsed);
-}
-
-/** checked before the sign-in, so nobody completes a device flow for a save that cannot land.
- * `secret set` guards the same write with the same message — see `shadowRefusal`. */
-function refuseWhenRepoCopiesShadow(params: {
-  access: ReturnType<typeof secretNamesSchema.parse>;
-  owner: string;
-  name: string;
-}): void {
-  const refusal = shadowRefusal({
-    overrides: params.access.overrides,
-    owner: params.owner,
-    name: params.name,
-  });
-  if (!refusal) return;
-  p.log.warn(refusal);
-  bail("nothing saved.");
 }
 
 async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<void> {
@@ -295,21 +283,19 @@ async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<
           : "org owner required to change secrets"
       );
 
-    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: CODEX_AUTH_SECRET });
+    const subscriptionTarget = {
+      owner: remote.owner,
+      repo: scope === "repo" ? remote.repo : undefined,
+    };
+    const choice = await chooseSubscription({
+      target: subscriptionTarget,
+      token,
+      name: CODEX_AUTH_SECRET,
+    });
 
-    if (access.secrets.includes(CODEX_AUTH_SECRET)) {
-      const overwrite = await p.select({
-        message: `${pc.cyan(CODEX_AUTH_SECRET)} is already configured — overwrite?`,
-        options: [
-          { value: true, label: "overwrite", hint: "rotate to a freshly minted credential" },
-          { value: false, label: "cancel" },
-        ],
-      });
-      handleCancel(overwrite);
-      if (!overwrite) {
-        p.cancel("canceled.");
-        return;
-      }
+    if (!choice) {
+      p.cancel("canceled.");
+      return;
     }
 
     p.log.info(
@@ -396,22 +382,16 @@ async function runCodexAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<
 
     const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
     spin.start(`saving ${pc.cyan(CODEX_AUTH_SECRET)} to ${target}`);
-    const result = await setPullfrogSecret({
+    const result = await saveSubscription({
       token,
-      owner: remote.owner,
-      repo: remote.repo,
+      target: subscriptionTarget,
       name: CODEX_AUTH_SECRET,
       value: savable.json,
-      scope,
+      replaceId: choice.replaceId,
     });
-    if (!result.saved) {
-      spin.stop(pc.red("could not save secret"));
-      p.log.warn(
-        `${result.error}\n  ${pc.dim("set it manually at:")} ${PULLFROG_API_URL}/console/${remote.owner}`
-      );
-      process.exit(1);
-    }
-    spin.stop(`saved ${pc.cyan(CODEX_AUTH_SECRET)} to ${target}`);
+    spin.stop(
+      `${result.reconnected ? "reconnected" : "added"} ${pc.cyan(result.label)} to ${target}`
+    );
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {
@@ -522,21 +502,19 @@ async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise
           : "org owner required to change secrets"
       );
 
-    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: CLAUDE_OAUTH_SECRET });
+    const subscriptionTarget = {
+      owner: remote.owner,
+      repo: scope === "repo" ? remote.repo : undefined,
+    };
+    const choice = await chooseSubscription({
+      target: subscriptionTarget,
+      token,
+      name: CLAUDE_OAUTH_SECRET,
+    });
 
-    if (access.secrets.includes(CLAUDE_OAUTH_SECRET)) {
-      const overwrite = await p.select({
-        message: `${pc.cyan(CLAUDE_OAUTH_SECRET)} is already configured — overwrite?`,
-        options: [
-          { value: true, label: "overwrite", hint: "replace with a freshly minted token" },
-          { value: false, label: "cancel" },
-        ],
-      });
-      handleCancel(overwrite);
-      if (!overwrite) {
-        p.cancel("canceled.");
-        return;
-      }
+    if (!choice) {
+      p.cancel("canceled.");
+      return;
     }
 
     p.log.info(
@@ -572,22 +550,16 @@ async function runClaudeAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise
 
     const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
     spin.start(`saving ${pc.cyan(CLAUDE_OAUTH_SECRET)} to ${target}`);
-    const result = await setPullfrogSecret({
+    const result = await saveSubscription({
       token,
-      owner: remote.owner,
-      repo: remote.repo,
+      target: subscriptionTarget,
       name: CLAUDE_OAUTH_SECRET,
-      value,
-      scope,
+      value: value,
+      replaceId: choice.replaceId,
     });
-    if (!result.saved) {
-      spin.stop(pc.red("could not save secret"));
-      p.log.warn(
-        `${result.error}\n  ${pc.dim("set it manually at:")} ${PULLFROG_API_URL}/console/${remote.owner}`
-      );
-      process.exit(1);
-    }
-    spin.stop(`saved ${pc.cyan(CLAUDE_OAUTH_SECRET)} to ${target}`);
+    spin.stop(
+      `${result.reconnected ? "reconnected" : "added"} ${pc.cyan(result.label)} to ${target}`
+    );
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {
@@ -698,21 +670,19 @@ async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<v
           : "org owner required to change secrets"
       );
 
-    refuseWhenRepoCopiesShadow({ access, owner: remote.owner, name: GROK_AUTH_SECRET });
+    const subscriptionTarget = {
+      owner: remote.owner,
+      repo: scope === "repo" ? remote.repo : undefined,
+    };
+    const choice = await chooseSubscription({
+      target: subscriptionTarget,
+      token,
+      name: GROK_AUTH_SECRET,
+    });
 
-    if (access.secrets.includes(GROK_AUTH_SECRET)) {
-      const overwrite = await p.select({
-        message: `${pc.cyan(GROK_AUTH_SECRET)} is already configured — overwrite?`,
-        options: [
-          { value: true, label: "overwrite", hint: "replace with a freshly minted credential" },
-          { value: false, label: "cancel" },
-        ],
-      });
-      handleCancel(overwrite);
-      if (!overwrite) {
-        p.cancel("canceled.");
-        return;
-      }
+    if (!choice) {
+      p.cancel("canceled.");
+      return;
     }
 
     spin.start("requesting a device code from xAI");
@@ -745,22 +715,16 @@ async function runGrokAuth(parsed: ReturnType<typeof parseCodexArgs>): Promise<v
 
     const target = describeSecretTarget({ owner: remote.owner, repo: remote.repo, scope });
     spin.start(`saving ${pc.cyan(GROK_AUTH_SECRET)} to ${target}`);
-    const result = await setPullfrogSecret({
+    const result = await saveSubscription({
       token,
-      owner: remote.owner,
-      repo: remote.repo,
+      target: subscriptionTarget,
       name: GROK_AUTH_SECRET,
       value: stringifyXaiAuthBody(fresh),
-      scope,
+      replaceId: choice.replaceId,
     });
-    if (!result.saved) {
-      spin.stop(pc.red("could not save secret"));
-      p.log.warn(
-        `${result.error}\n  ${pc.dim("set it manually at:")} ${PULLFROG_API_URL}/console/${remote.owner}`
-      );
-      process.exit(1);
-    }
-    spin.stop(`saved ${pc.cyan(GROK_AUTH_SECRET)} to ${target}`);
+    spin.stop(
+      `${result.reconnected ? "reconnected" : "added"} ${pc.cyan(result.label)} to ${target}`
+    );
     setActiveSpin(null);
     p.outro("done.");
   } catch (error) {

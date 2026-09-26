@@ -7,8 +7,10 @@ import { log } from "./cli.ts";
 import { mintIdToken, type OctokitWithPlugins, parseRepoContext } from "./github.ts";
 import { isTransientOctokitError } from "./isTransientNetworkError.ts";
 import { type AccountPlan, fetchRunContext, type RepoSettings } from "./runContext.ts";
+import type { CredentialAccess } from "./subscriptionCredentials.ts";
 
 export interface RunContextData {
+  credentialAccess?: CredentialAccess | undefined;
   repo: {
     owner: string;
     name: string;
@@ -109,6 +111,7 @@ export async function resolveRunContextData(
     plan: runContext.plan,
     proxyModel: runContext.proxyModel,
     dbSecrets: runContext.dbSecrets,
+    credentialAccess: runContext.credentialAccess,
     commercialRefused: runContext.commercialRefused,
     // a failed mint on a runner that should have been able to mint is the same
     // outcome as the server-side failure: the run never sees stored secrets.

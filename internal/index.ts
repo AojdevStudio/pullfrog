@@ -132,6 +132,12 @@ export {
   RUN_STATUS_CHECK_NAME,
   runStatusCheckNeedsFinalizing,
 } from "../utils/runStatusCheck.ts";
+export * from "../utils/subscriptionCredentials.ts";
+export {
+  probeSubscription,
+  SubscriptionCredentialError,
+  subscriptionIdentity,
+} from "../utils/subscriptionProbe.ts";
 export {
   isValidTimeString,
   parseTimeString,
