@@ -165,6 +165,7 @@ describe("effort ladders mirror published catalogs", async () => {
       // The Go GLM Flash endpoint rejects reasoning_effort even though models.dev
       // lists effort rungs; preserve the observed transport contract until fixed.
       if (alias.slug === "opencode-go/glm-flash") {
+        expect(rungs(publishedEffort(alias.resolve))).toBeDefined();
         expect(alias.effort).toEqual([]);
         return;
       }

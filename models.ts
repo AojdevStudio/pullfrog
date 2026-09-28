@@ -874,8 +874,8 @@ export const providers = {
       "glm-flash": {
         displayName: "GLM Flash",
         resolve: "opencode-go/glm-5.3-flash",
-        // The Go endpoint rejected reasoning_effort=high during PR review #964
-        // (run 36464251799), despite models.dev advertising this ladder.
+        // The Go endpoint rejects reasoning_effort ("native reasoning control
+        // reasoning_effort is not allowed"), despite models.dev advertising a ladder.
         effort: [],
         openRouterEffort: ["low", "high", "max"],
         openRouterResolve: "openrouter/z-ai/glm-5.3-flash",
